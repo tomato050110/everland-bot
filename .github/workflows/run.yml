@@ -24,8 +24,8 @@ jobs:
       - run: |
           git config --global user.name "bot"
           git config --global user.email "bot@github.com"
-          if git status --porcelain | grep -q "latest_notice_id.txt"; then
-            git add latest_notice_id.txt
-            git commit -m "update notice"
+          if git status --porcelain | grep -q "latest_targets_state.json"; then
+            git add latest_targets_state.json
+            git commit -m "update notice state"
             git push
           fi
