@@ -1,12 +1,12 @@
 import os
 import json
 import hashlib
+import time
 import requests
 from bs4 import BeautifulSoup
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
-HISTORY_FILE = "latest_targets_state.json"
 
 TARGETS = [
     # 🎡 에버랜드 채널
@@ -52,15 +52,7 @@ def get_page_signature(html_text):
     text = soup.get_text(separator=" ", strip=True)
     return hashlib.md5(text.encode("utf-8")).hexdigest()
 
-def main():
-    saved_states = {}
-    if os.path.exists(HISTORY_FILE):
-        try:
-            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                saved_states = json.load(f)
-        except Exception:
-            saved_states = {}
-
+def run_check(saved_states):
     is_first_run = (len(saved_states) == 0)
     updated_states = dict(saved_states)
 
@@ -85,16 +77,25 @@ def main():
                 updated_states[name] = current_sig
                 msg = f"[업데이트 감지!]\n\n구분: {name}\n새로운 공지 또는 변경 사항이 등록되었습니다.\n바로가기: {url}"
                 send_telegram(msg)
-                print(f"[{name}] 업데이트 발견 및 발송")
+                print(f"[{name}] 감지 및 알림 발송 완료")
             elif not prev_sig:
                 updated_states[name] = current_sig
 
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(updated_states, f, ensure_ascii=False, indent=2)
-
     if is_first_run:
-        send_telegram("[에버랜드 리조트 10대 채널 통합 감시 가동]\n에버랜드·캐리비안베이·홈브리지·보도자료 전체 등록 완료!")
-        print("10대 채널 통합 초기화 완료")
+        send_telegram("[에버랜드 24시간 실시간 모니터링 가동]\n1분 30초 간격 상시 감시가 시작되었습니다!")
+        print("초기 기준값 생성 완료")
+
+    return updated_states
+
+def main():
+    print("24시간 상시 모니터링 시작 (간격: 90초)")
+    current_states = {}
+    while True:
+        try:
+            current_states = run_check(current_states)
+        except Exception as e:
+            print(f"루프 에러: {e}")
+        time.sleep(90)  # 1분 30초(90초)마다 반복 검사
 
 if __name__ == "__main__":
     main()
