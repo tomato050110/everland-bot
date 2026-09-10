@@ -2,27 +2,24 @@ import os
 import json
 import hashlib
 import time
+import threading
 import requests
 from bs4 import BeautifulSoup
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
 TARGETS = [
-    # 🎡 에버랜드 채널
     {"name": "에버랜드 공지사항", "url": "https://www.everland.com/everland/announcement"},
     {"name": "에버랜드 이벤트", "url": "https://www.everland.com/everland/event"},
     {"name": "에버랜드 티켓/정기권", "url": "https://www.everland.com/everland/ticket"},
     {"name": "에버랜드 체험 프로그램", "url": "https://www.everland.com/everland/promotion/exp-program"},
     {"name": "에버랜드 메인 홈 배너", "url": "https://www.everland.com/everland/home/main"},
     {"name": "에버랜드 공식 보도자료", "url": "https://www.witheverland.com/category/PRESS%20CENTER/%EB%B3%B4%EB%8F%84%EC%9E%90%EB%A3%8C"},
-
-    # 🌊 캐리비안베이 채널
     {"name": "캐리비안베이 공지사항", "url": "https://www.everland.com/caribbeanbay/announcement"},
     {"name": "캐리비안베이 이벤트", "url": "https://www.everland.com/caribbeanbay/event"},
     {"name": "캐리비안베이 메인 홈 배너", "url": "https://www.everland.com/caribbeanbay/home/main"},
-
-    # 🏡 홈브리지(숙소) 채널
     {"name": "홈브리지 공지사항", "url": "https://www.everland.com/homebridge/announcement"}
 ]
 
@@ -65,7 +62,7 @@ def run_check(saved_states):
             res.raise_for_status()
             current_sig = get_page_signature(res.text)
         except Exception as e:
-            print(f"[{name}] 접근 실패: {e}")
+            print(f"[{name}] 접근 에러: {e}")
             continue
 
         prev_sig = saved_states.get(name)
@@ -82,20 +79,40 @@ def run_check(saved_states):
                 updated_states[name] = current_sig
 
     if is_first_run:
-        send_telegram("[에버랜드 24시간 실시간 모니터링 가동]\n1분 30초 간격 상시 감시가 시작되었습니다!")
-        print("초기 기준값 생성 완료")
+        send_telegram("[에버랜드 24시간 실시간 모니터링 가동]\n타임아웃 방지 및 1분 30초 상시 감시가 시작되었습니다!")
+        print("초기 기준값 세팅 완료")
 
     return updated_states
 
-def main():
-    print("24시간 상시 모니터링 시작 (간격: 90초)")
+def monitor_loop():
     current_states = {}
     while True:
         try:
             current_states = run_check(current_states)
         except Exception as e:
-            print(f"루프 에러: {e}")
-        time.sleep(90)  # 1분 30초(90초)마다 반복 검사
+            print(f"루프 예외: {e}")
+        time.sleep(90)
+
+# Render 웹 포트 요구 충족용 더미 서버 (타임아웃 방지)
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Bot is alive and running!")
+
+    def log_message(self, format, *args):
+        return  # 불필요한 접속 로그 숨김
+
+def start_dummy_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    server.serve_forever()
 
 if __name__ == "__main__":
-    main()
+    # 백그라운드 스레드로 감시 루프 실행
+    t = threading.Thread(target=monitor_loop, daemon=True)
+    t.start()
+    
+    # 메인 스레드에서 Render 포트 응답 대기 (UptimeRobot과 통신)
+    start_dummy_server()
