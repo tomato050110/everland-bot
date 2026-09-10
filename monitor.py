@@ -1,6 +1,8 @@
 import os
 import hashlib
 import time
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 import requests
 from bs4 import BeautifulSoup
 
@@ -31,7 +33,7 @@ def send_telegram(text):
     try:
         requests.post(url, json={"chat_id": CHAT_ID, "text": text}, timeout=10)
     except Exception as e:
-        print(f"전송 실패: {e}")
+        print(f"텔레그램 전송 에러: {e}")
 
 def get_hash(url):
     try:
@@ -44,33 +46,50 @@ def get_hash(url):
         text = soup.get_text(separator=" ", strip=True)
         return hashlib.md5(text.encode("utf-8")).hexdigest()
     except Exception as e:
-        print(f"조회 실패 ({url}): {e}")
+        print(f"페이지 수집 실패: {e}")
         return None
 
-send_telegram("[에버랜드 24시간 실시간 모니터링 가동]\n상시 감시 시스템이 정상 시작되었습니다!")
-
-saved_states = {}
-
-for item in TARGETS:
-    sig = get_hash(item["url"])
-    if sig:
-        saved_states[item["name"]] = sig
-
-print(f"초기 세팅 완료: {len(saved_states)}개 채널 감시 시작")
-
-while True:
-    time.sleep(90)
+def monitor_loop():
+    send_telegram("[에버랜드 모니터링 가동]\n타임아웃 방지 서버 및 90초 상시 감시가 시작되었습니다!")
+    saved_states = {}
     for item in TARGETS:
-        name = item["name"]
-        url = item["url"]
-        new_sig = get_hash(url)
-        if not new_sig:
-            continue
-        old_sig = saved_states.get(name)
-        if old_sig and old_sig != new_sig:
-            saved_states[name] = new_sig
-            msg = f"[업데이트 감지!]\n\n구분: {name}\n새로운 공지 또는 변경 사항이 등록되었습니다.\n바로가기: {url}"
-            send_telegram(msg)
-            print(f"[{name}] 감지 완료")
-        elif not old_sig:
-            saved_states[name] = new_sig
+        sig = get_hash(item["url"])
+        if sig:
+            saved_states[item["name"]] = sig
+    print(f"초기 세팅 완료: {len(saved_states)}개 채널 감시 중")
+
+    while True:
+        time.sleep(90)
+        for item in TARGETS:
+            name = item["name"]
+            url = item["url"]
+            new_sig = get_hash(url)
+            if not new_sig:
+                continue
+            old_sig = saved_states.get(name)
+            if old_sig and old_sig != new_sig:
+                saved_states[name] = new_sig
+                msg = f"[업데이트 감지!]\n\n구분: {name}\n새로운 공지 또는 변경 사항이 등록되었습니다.\n바로가기: {url}"
+                send_telegram(msg)
+            elif not old_sig:
+                saved_states[name] = new_sig
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+    def log_message(self, format, *args):
+        return
+
+def run_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    server.serve_forever()
+
+if __name__ == "__main__":
+    t = threading.Thread(target=monitor_loop, daemon=True)
+    t.start()
+    run_server()
