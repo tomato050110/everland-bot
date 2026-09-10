@@ -7,6 +7,7 @@ from playwright.sync_api import sync_playwright
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
+# 감시할 대상 페이지 목록
 TARGETS = [
     {"name": "에버랜드 이벤트", "url": "https://www.everland.com/everland/event"},
     {"name": "에버랜드 공지사항", "url": "https://www.everland.com/everland/announcement"},
@@ -25,10 +26,10 @@ def send_telegram(text):
     try:
         requests.post(url, json={"chat_id": CHAT_ID, "text": text}, timeout=10)
     except Exception as e:
-        print(f"전송 실패: {e}")
+        print(f"텔레그램 전송 에러: {e}")
 
 def run():
-    # 이전 상태 불러오기
+    # 1. 이전 상태 파일 불러오기
     saved_states = {}
     if os.path.exists(STATE_FILE):
         try:
@@ -40,6 +41,7 @@ def run():
     new_states = {}
     changes = []
 
+    # 2. 크롬 브라우저 기동 및 텍스트 파싱
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
@@ -48,28 +50,41 @@ def run():
             name = item["name"]
             url = item["url"]
             try:
-                page.goto(url, wait_until="networkidle", timeout=30000)
-                page.wait_for_timeout(3000)  # 자바스크립트 렌더링 완료 대기
-                text = page.inner_text("body")
+                # 페이지 로딩 및 렌더링 대기
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(3000)
                 
-                # 화면 텍스트 기반 고유 해시값 생성
-                current_hash = hashlib.md5(text.encode("utf-8")).hexdigest()
+                # 사람이 눈으로 보는 텍스트 전체 추출
+                body_text = page.inner_text("body")
+                
+                # 텍스트 고유 해시값 생성
+                current_hash = hashlib.md5(body_text.encode("utf-8")).hexdigest()
                 new_states[name] = current_hash
 
                 old_hash = saved_states.get(name)
-                # 이전 기록이 있고 해시값이 달라졌다면 실제 공지 변동 발생
+                # 이전 기록이 있고, 해시값이 달라졌다면 실제 변동 발생
                 if old_hash and old_hash != current_hash:
-                    changes.append(f"• [{name}] 공지/이벤트 내용 변동 감지!\n바로가기: {url}")
+                    changes.append(f"• [{name}] 변동 감지!\n바로가기: {url}")
+                elif not old_hash:
+                    # 첫 실행 시 기준값 기록
+                    print(f"[{name}] 초기 기준값 등록 완료 ({len(body_text)}자)")
             except Exception as e:
-                print(f"{name} 렌더링 에러: {e}")
+                print(f"[{name}] 처리 실패: {e}")
+                # 에러 시 이전 상태를 유지하여 오작동 방지
+                if name in saved_states:
+                    new_states[name] = saved_states[name]
 
         browser.close()
 
-    # 변동이 감지되었을 때만 알림 전송
+    # 3. 변동이 감지된 경우에만 텔레그램 알림 발송
     if changes:
-        send_telegram("[에버랜드 실시간 변동 알림]\n\n" + "\n\n".join(changes))
+        alert_text = "[에버랜드 공지/이벤트 변동 감지]\n\n" + "\n\n".join(changes)
+        send_telegram(alert_text)
+        print("변동 사항 텔레그램 전송 완료")
+    else:
+        print("변동 사항 없음 (정상)")
 
-    # 최신 상태 저장
+    # 4. 최신 상태를 파일에 저장
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(new_states, f, ensure_ascii=False, indent=2)
 
