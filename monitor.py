@@ -9,7 +9,6 @@ import requests
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
-# 에버랜드 및 캐리비안베이 실제 데이터 API 엔드포인트 목록
 TARGETS = [
     {
         "name": "에버랜드 이벤트 목록",
@@ -30,6 +29,12 @@ TARGETS = [
         "link": "https://www.everland.com/everland/ticket"
     },
     {
+        "name": "정기권 공지/소식",
+        "url": "https://www.everland.com/api/everland/ticket/annual-notices",
+        "fallback_url": "https://www.everland.com/everland/ticket",
+        "link": "https://www.everland.com/everland/ticket"
+    },
+    {
         "name": "캐리비안베이 이벤트",
         "url": "https://www.everland.com/api/caribbeanbay/events",
         "fallback_url": "https://www.everland.com/caribbeanbay/event",
@@ -46,12 +51,6 @@ TARGETS = [
         "url": "https://www.everland.com/api/homebridge/announcements",
         "fallback_url": "https://www.everland.com/homebridge/announcement",
         "link": "https://www.everland.com/homebridge/announcement"
-    },
-    {
-        "name": "공식 보도자료",
-        "url": "https://www.witheverland.com/category/PRESS%20CENTER/%EB%B3%B4%EB%8F%84%EC%9E%90%EB%A3%8C",
-        "fallback_url": None,
-        "link": "https://www.witheverland.com/category/PRESS%20CENTER/%EB%B3%B4%EB%8F%84%EC%9E%90%EB%A3%8C"
     }
 ]
 
@@ -71,7 +70,6 @@ def send_telegram(text):
         print(f"텔레그램 전송 에러: {e}")
 
 def get_data_hash(item):
-    # 1순위: 내부 JSON API 호출
     url = item["url"]
     try:
         res = requests.get(url, headers=HEADERS, timeout=12)
@@ -80,7 +78,6 @@ def get_data_hash(item):
     except Exception:
         pass
 
-    # 2순위: API 경로 변경 시 웹페이지 본문으로 대체
     if item.get("fallback_url"):
         try:
             res = requests.get(item["fallback_url"], headers=HEADERS, timeout=12)
@@ -92,13 +89,13 @@ def get_data_hash(item):
     return None
 
 def monitor_loop():
-    send_telegram("[에버랜드 API 실시간 모니터링 가동]\n내부 데이터 직접 감시가 정상 작동 중입니다!")
+    send_telegram("[에버랜드 정밀 모니터링 가동]\n정기권 소식 채널 추가 완료! 상시 감시를 시작합니다.")
     saved_states = {}
     for item in TARGETS:
         sig = get_data_hash(item)
         if sig:
             saved_states[item["name"]] = sig
-    print(f"기준값 세팅 완료: {len(saved_states)}개 채널 감시 시작")
+    print(f"기준값 세팅 완료: {len(saved_states)}개 핵심 채널 감시 시작")
 
     while True:
         time.sleep(90)
