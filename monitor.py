@@ -1,6 +1,5 @@
 import os
 import hashlib
-import json
 import time
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -9,55 +8,20 @@ import requests
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
+# 실제 공지가 노출되는 페이지 목록
 TARGETS = [
-    {
-        "name": "에버랜드 이벤트 목록",
-        "url": "https://www.everland.com/api/everland/events",
-        "fallback_url": "https://www.everland.com/everland/event",
-        "link": "https://www.everland.com/everland/event"
-    },
-    {
-        "name": "에버랜드 공지사항",
-        "url": "https://www.everland.com/api/everland/announcements",
-        "fallback_url": "https://www.everland.com/everland/announcement",
-        "link": "https://www.everland.com/everland/announcement"
-    },
-    {
-        "name": "에버랜드 티켓/프로모션",
-        "url": "https://www.everland.com/api/everland/tickets",
-        "fallback_url": "https://www.everland.com/everland/ticket",
-        "link": "https://www.everland.com/everland/ticket"
-    },
-    {
-        "name": "정기권 공지/소식",
-        "url": "https://www.everland.com/api/everland/ticket/annual-notices",
-        "fallback_url": "https://www.everland.com/everland/ticket",
-        "link": "https://www.everland.com/everland/ticket"
-    },
-    {
-        "name": "캐리비안베이 이벤트",
-        "url": "https://www.everland.com/api/caribbeanbay/events",
-        "fallback_url": "https://www.everland.com/caribbeanbay/event",
-        "link": "https://www.everland.com/caribbeanbay/event"
-    },
-    {
-        "name": "캐리비안베이 공지사항",
-        "url": "https://www.everland.com/api/caribbeanbay/announcements",
-        "fallback_url": "https://www.everland.com/caribbeanbay/announcement",
-        "link": "https://www.everland.com/caribbeanbay/announcement"
-    },
-    {
-        "name": "홈브리지 공지사항",
-        "url": "https://www.everland.com/api/homebridge/announcements",
-        "fallback_url": "https://www.everland.com/homebridge/announcement",
-        "link": "https://www.everland.com/homebridge/announcement"
-    }
+    {"name": "에버랜드 이벤트", "url": "https://www.everland.com/everland/event"},
+    {"name": "에버랜드 공지사항", "url": "https://www.everland.com/everland/announcement"},
+    {"name": "에버랜드 정기권", "url": "https://www.everland.com/everland/ticket"},
+    {"name": "캐리비안베이 이벤트", "url": "https://www.everland.com/caribbeanbay/event"},
+    {"name": "캐리비안베이 공지사항", "url": "https://www.everland.com/caribbeanbay/announcement"},
+    {"name": "홈브리지 공지사항", "url": "https://www.everland.com/homebridge/announcement"}
 ]
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Referer": "https://www.everland.com/"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7"
 }
 
 def send_telegram(text):
@@ -67,58 +31,55 @@ def send_telegram(text):
     try:
         requests.post(url, json={"chat_id": CHAT_ID, "text": text}, timeout=10)
     except Exception as e:
-        print(f"텔레그램 전송 에러: {e}")
+        print(f"텔레그램 실패: {e}")
 
-def get_data_hash(item):
-    url = item["url"]
+def check_target(url):
     try:
-        res = requests.get(url, headers=HEADERS, timeout=12)
-        if res.status_code == 200:
-            return hashlib.md5(res.content).hexdigest()
-    except Exception:
-        pass
-
-    if item.get("fallback_url"):
-        try:
-            res = requests.get(item["fallback_url"], headers=HEADERS, timeout=12)
-            if res.status_code == 200:
-                return hashlib.md5(res.content).hexdigest()
-        except Exception as e:
-            print(f"[{item['name']}] 수집 에러: {e}")
-            return None
-    return None
+        res = requests.get(url, headers=HEADERS, timeout=15)
+        # 응답 코드와 데이터 크기 반환
+        return res.status_code, len(res.content), hashlib.md5(res.content).hexdigest()
+    except Exception as e:
+        return 0, str(e), None
 
 def monitor_loop():
-    send_telegram("[에버랜드 정밀 모니터링 가동]\n정기권 소식 채널 추가 완료! 상시 감시를 시작합니다.")
+    time.sleep(3)
     saved_states = {}
+    report_lines = []
+
+    # 1회차 전체 점검 및 결과 생성
     for item in TARGETS:
-        sig = get_data_hash(item)
-        if sig:
+        status, size, sig = check_target(item["url"])
+        if status == 200 and sig:
             saved_states[item["name"]] = sig
-    print(f"기준값 세팅 완료: {len(saved_states)}개 핵심 채널 감시 시작")
+            report_lines.append(f"O {item['name']}: {size} bytes")
+        else:
+            report_lines.append(f"X {item['name']}: 에러({status})")
+
+    # 가동 즉시 현재 읽은 상태를 그대로 보고
+    report_msg = "[진단 결과 보고]\n" + "\n".join(report_lines)
+    send_telegram(report_msg)
 
     while True:
         time.sleep(90)
         for item in TARGETS:
             name = item["name"]
-            new_sig = get_data_hash(item)
-            if not new_sig:
+            status, size, new_sig = check_target(item["url"])
+            if status != 200 or not new_sig:
                 continue
+
             old_sig = saved_states.get(name)
             if old_sig and old_sig != new_sig:
                 saved_states[name] = new_sig
-                msg = f"[새 공지/이벤트 등록 감지!]\n\n구분: {name}\n실제 데이터 변경이 감지되었습니다.\n바로가기: {item['link']}"
-                send_telegram(msg)
-                print(f"[{name}] 변경 감지 완료")
+                send_telegram(f"[변동 감지!]\n{name} 내용 변경됨 (크기: {size} bytes)\n{item['url']}")
             elif not old_sig:
                 saved_states[name] = new_sig
 
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
-        self.send_header("Content-type", "text/plain")
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.end_headers()
-        self.wfile.write(b"OK")
+        self.wfile.write(b"OK - EVERLAND BOT RUNNING")
 
     def log_message(self, format, *args):
         return
