@@ -2,7 +2,6 @@ name: Everland Real Browser Monitor
 
 on:
   schedule:
-    # 매 5분마다 자동 실행
     - cron: '*/5 * * * *'
   workflow_dispatch:
 
@@ -24,7 +23,7 @@ jobs:
       - name: 필수 라이브러리 및 크롬 설치
         run: |
           pip install -r requirements.txt
-          playwright install --with-deps chromium
+          playwright install chromium
 
       - name: 화면 렌더링 감시 스크립트 실행
         env:
