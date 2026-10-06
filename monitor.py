@@ -11,6 +11,9 @@ TARGETS = [
     {"name": "에버랜드 이벤트", "url": "https://www.everland.com/everland/event"},
     {"name": "에버랜드 공지사항", "url": "https://www.everland.com/everland/announcement"},
     {"name": "에버랜드 정기권", "url": "https://www.everland.com/everland/ticket"},
+    {"name": "에버랜드 체험 프로그램", "url": "https://www.everland.com/everland/promotion/exp-program"},
+    {"name": "에버랜드 테마뮤직", "url": "https://www.everland.com/everland/everstory/everland-music"},
+    {"name": "에버랜드 드림투어", "url": "https://www.everland.com/everland/promotion/dream-tour"},
     {"name": "캐리비안베이 이벤트", "url": "https://www.everland.com/caribbeanbay/event"},
     {"name": "캐리비안베이 공지사항", "url": "https://www.everland.com/caribbeanbay/announcement"},
     {"name": "홈브리지 공지사항", "url": "https://www.everland.com/homebridge/announcement"}
@@ -47,17 +50,29 @@ def run():
             name = item["name"]
             url = item["url"]
             try:
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(3000)
-                body_text = page.inner_text("body")
-                current_hash = hashlib.md5(body_text.encode("utf-8")).hexdigest()
-                new_states[name] = current_hash
+                # 네트워크 통신 완료 및 SPA 데이터 렌더링 대기
+                page.goto(url, wait_until="networkidle", timeout=30000)
+                page.wait_for_timeout(5000)
 
-                old_hash = saved_states.get(name)
-                if old_hash and old_hash != current_hash:
-                    changes.append(f"• [{name}] 변동 감지!\n바로가기: {url}")
-                elif not old_hash:
-                    print(f"[{name}] 초기 세팅 완료 ({len(body_text)}자)")
+                # main 영역 우선 추출, 없으면 body 추출
+                content_element = page.query_selector("main") or page.query_selector("body")
+                body_text = content_element.inner_text().strip() if content_element else ""
+
+                # 유효 데이터(150자 이상)가 정상 렌더링되었을 때만 해시 비교
+                if len(body_text) > 150:
+                    current_hash = hashlib.md5(body_text.encode("utf-8")).hexdigest()
+                    new_states[name] = current_hash
+
+                    old_hash = saved_states.get(name)
+                    if old_hash and old_hash != current_hash:
+                        changes.append(f"• [{name}] 변동 감지!\n바로가기: {url}")
+                    elif not old_hash:
+                        print(f"[{name}] 초기 세팅 완료 ({len(body_text)}자)")
+                else:
+                    print(f"[{name}] 데이터 미완성/짧음 ({len(body_text)}자) -> 이전 상태 유지")
+                    if name in saved_states:
+                        new_states[name] = saved_states[name]
+
             except Exception as e:
                 print(f"[{name}] 렌더링 실패: {e}")
                 if name in saved_states:
@@ -66,7 +81,7 @@ def run():
         browser.close()
 
     if changes:
-        alert_text = "[에버랜드 공지/이벤트 변동 감지]\n\n" + "\n\n".join(changes)
+        alert_text = "[에버랜드/캐리비안베이/홈브리지 변동 감지]\n\n" + "\n\n".join(changes)
         send_telegram(alert_text)
         print("텔레그램 전송 완료")
     else:
