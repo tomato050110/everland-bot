@@ -3,7 +3,9 @@ name: Everland Real Browser Monitor
 on:
   schedule:
     - cron: '*/5 * * * *'
-  workflow_dispatch:
+    - cron: '2-59/5 * * * *'
+    - cron: '4-59/5 * * * *'
+  workflow_dispatch: # 수동으로도 언제든 실행할 수 있는 버튼 유지
 
 permissions:
   contents: write
