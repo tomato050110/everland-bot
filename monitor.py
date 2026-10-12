@@ -50,20 +50,17 @@ def run():
                 page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 page.wait_for_timeout(3000)
                 
-                # 핵심 변경: 헤더, 배너 롤링, 푸터를 무시하고 '실제 본문 콘텐츠 영역'만 추출
                 main_elem = page.query_selector("main")
                 if main_elem:
                     content_text = main_elem.inner_text()
                 else:
                     content_text = page.inner_text("body")
 
-                # 줄바꿈과 공백 정리 후 고유 해시 생성
                 clean_text = " ".join(content_text.split())
                 current_hash = hashlib.md5(clean_text.encode("utf-8")).hexdigest()
                 new_states[name] = current_hash
 
                 old_hash = saved_states.get(name)
-                # 이전 기록이 있고 해시값이 달라졌을 때만 변동 판단
                 if old_hash and old_hash != current_hash:
                     changes.append(f"• [{name}] 공지/이벤트 변동 감지!\n바로가기: {url}")
                 elif not old_hash:
@@ -75,11 +72,9 @@ def run():
 
         browser.close()
 
-    # 변동이 감지된 경우에만 알림 전송
     if changes:
         send_telegram("[에버랜드 실시간 변동 알림]\n\n" + "\n\n".join(changes))
 
-    # 최신 상태 저장
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(new_states, f, ensure_ascii=False, indent=2)
 
