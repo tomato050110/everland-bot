@@ -10,7 +10,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 STATE_FILE = "latest_targets_state.json"
 
-# 유저가 직접 제공한 정확한 9개 감시 대상 URL
+# 감시 대상 9개 URL
 TARGETS = [
     {"name": "공지사항", "url": "https://www.everland.com/everland/announcement"},
     {"name": "이벤트", "url": "https://www.everland.com/everland/event"},
@@ -74,15 +74,12 @@ async def check_targets():
             print(f"[{name}] 감시 중: {url}")
 
             try:
-                # 네트워크 상태 안정화 대기
                 await page.goto(url, wait_until="networkidle", timeout=30000)
-                await page.wait_for_timeout(3000)  # 자바스크립트 추가 렌더링 3초 대기
+                await page.wait_for_timeout(3000)
 
-                # 메인 영역 또는 본문 전체 텍스트 추출
                 content_element = await page.query_selector("main") or await page.query_selector("body")
                 raw_text = await content_element.inner_text() if content_element else ""
                 
-                # 공백 정리
                 clean_text = " ".join(raw_text.split())
                 
                 if not clean_text:
@@ -92,7 +89,6 @@ async def check_targets():
 
                 current_state[name] = clean_text
 
-                # 이전 상태와 비교
                 if name in prev_state:
                     if prev_state[name] != clean_text:
                         print(f"★ [{name}] 변동 감지!")
@@ -102,20 +98,17 @@ async def check_targets():
 
             except Exception as e:
                 print(f"[{name}] 로딩 실패/에러 발생: {e}")
-                # 로딩 실패 시 기존 상태를 유지하여 잘못된 덮어쓰기 방지
                 if name in prev_state:
                     current_state[name] = prev_state[name]
 
         await browser.close()
 
-    # 변동 사항이 있을 때만 텔레그램 전송
     if updated_items:
-        msg = "<b>🚨 에버랜드 새 소식 알림</b>\n\n"
+        msg = "<b>🚨 에버랜드/캐리비안베이/홈브리지 새 소식 알림</b>\n\n"
         for item_name, item_url in updated_items:
             msg += f"• <b>{item_name}</b> 업데이트 발생!\n👉 <a href='{item_url}'>바로가기</a>\n\n"
         send_telegram(msg)
     
-    # 상태 업데이트 저장
     save_current_state(current_state)
 
 if __name__ == "__main__":
