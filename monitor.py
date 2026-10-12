@@ -1,99 +1,61 @@
-import os
-import json
-import asyncio
-import urllib.request
-import urllib.parse
+import os, json, asyncio, urllib.request, urllib.parse
 from playwright.async_api import async_playwright
 
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHAT_ID = os.environ.get("CHAT_ID")
-STATE_FILE = "latest_targets_state.json"
-
-TARGETS = [
-    {"name": "공지사항", "url": "https://www.everland.com/everland/announcement"},
-    {"name": "이벤트", "url": "https://www.everland.com/everland/event"},
-    {"name": "정기권", "url": "https://www.everland.com/everland/ticket"},
-    {"name": "체험", "url": "https://www.everland.com/everland/promotion/exp-program"},
-    {"name": "테마뮤직", "url": "https://www.everland.com/everland/everstory/everland-music"},
-    {"name": "드림투어", "url": "https://www.everland.com/everland/promotion/dream-tour"},
-    {"name": "캐리비안베이 공지", "url": "https://www.everland.com/caribbeanbay/announcement"},
-    {"name": "캐비이벤트", "url": "https://www.everland.com/caribbeanbay/event"},
-    {"name": "홈브리지", "url": "https://www.everland.com/homebridge/announcement"}
+T = [
+    {"n": "공지사항", "u": "https://www.everland.com/everland/announcement"},
+    {"n": "이벤트", "u": "https://www.everland.com/everland/event"},
+    {"n": "정기권", "u": "https://www.everland.com/everland/ticket"},
+    {"n": "체험", "u": "https://www.everland.com/everland/promotion/exp-program"},
+    {"n": "테마뮤직", "u": "https://www.everland.com/everland/everstory/everland-music"},
+    {"n": "드림투어", "u": "https://www.everland.com/everland/promotion/dream-tour"},
+    {"n": "캐리비안베이 공지", "u": "https://www.everland.com/caribbeanbay/announcement"},
+    {"n": "캐비이벤트", "u": "https://www.everland.com/caribbeanbay/event"},
+    {"n": "홈브리지", "u": "https://www.everland.com/homebridge/announcement"}
 ]
+F = "latest_targets_state.json"
 
-def send_telegram(message):
-    if not TELEGRAM_TOKEN or not CHAT_ID:
-        return
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = urllib.parse.urlencode({
-        "chat_id": CHAT_ID,
-        "text": message,
-        "parse_mode": "HTML"
-    }).encode("utf-8")
-    try:
-        req = urllib.request.Request(url, data=payload)
-        with urllib.request.urlopen(req) as resp:
-            pass
-    except Exception as e:
-        print(e)
-
-def load_previous_state():
-    if os.path.exists(STATE_FILE):
+async def run():
+    tok = os.environ.get("TELEGRAM_TOKEN")
+    cid = os.environ.get("CHAT_ID")
+    prev = {}
+    if os.path.exists(F):
         try:
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            return {}
-    return {}
-
-def save_current_state(state):
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
-
-async def check_targets():
-    prev_state = load_previous_state()
-    current_state = {}
-    updated_items = []
-
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
-
-        for target in TARGETS:
-            name = target["name"]
-            url = target["url"]
-            try:
-                await page.goto(url, wait_until="networkidle", timeout=30000)
-                await page.wait_for_timeout(3000)
-
-                content_element = await page.query_selector("main") or await page.query_selector("body")
-                raw_text = await content_element.inner_text() if content_element else ""
-                clean_text = " ".join(raw_text.split())
-                
-                if not clean_text:
-                    current_state[name] = prev_state.get(name, "")
-                    continue
-
-                current_state[name] = clean_text
-
-                if name in prev_state:
-                    if prev_state[name] != clean_text:
-                        updated_items.append((name, url))
-                else:
-                    current_state[name] = clean_text
-            except Exception as e:
-                if name in prev_state:
-                    current_state[name] = prev_state[name]
-
-        await browser.close()
-
-    if updated_items:
-        msg = "<b>🚨 에버랜드 통합 소식 알림</b>\n\n"
-        for item_name, item_url in updated_items:
-            msg += f"• <b>{item_name}</b> 업데이트 발생!\n👉 <a href='{item_url}'>바로가기</a>\n\n"
-        send_telegram(msg)
+            with open(F, "r", encoding="utf-8") as f: prev = json.load(f)
+        except: prev = {}
     
-    save_current_state(current_state)
+    curr, up = {}, []
+    async with async_playwright() as p:
+        b = await p.chromium.launch(headless=True)
+        pg = await b.new_page()
+        for t in T:
+            try:
+                await pg.goto(t["u"], wait_until="networkidle", timeout=30000)
+                await pg.wait_for_timeout(3000)
+                el = await pg.query_selector("main") or await pg.query_selector("body")
+                txt = " ".join((await el.inner_text()).split()) if el else ""
+                if not txt:
+                    curr[t["n"]] = prev.get(t["n"], "")
+                    continue
+                curr[t["n"]] = txt
+                if t["n"] in prev and prev[t["n"]] != txt:
+                    up.append((t["n"], t["u"]))
+                elif t["n"] not in prev:
+                    pass
+            except Exception as e:
+                if t["n"] in prev: curr[t["n"]] = prev[t["n"]]
+        await b.close()
+    
+    if up and tok and cid:
+        msg = "<b>🚨 에버랜드 통합 소식 알림</b>\n\n"
+        for n, u in up: msg += f"• <b>{n}</b> 업데이트!\n👉 <a href='{u}'>바로가기</a>\n\n"
+        url = f"https://api.telegram.org/bot{tok}/sendMessage"
+        data = urllib.parse.urlencode({"chat_id": cid, "text": msg, "parse_mode": "HTML"}).encode("utf-8")
+        try:
+            req = urllib.request.Request(url, data=data)
+            with urllib.request.urlopen(req) as r: pass
+        except: pass
+        
+    with open(F, "w", encoding="utf-8") as f: json.dump(curr, f, ensure_ascii=False, indent=2)
 
 if __name__ == "__main__":
-    asyncio.run(check_targets())
+    asyncio.run(run())
