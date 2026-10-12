@@ -1,94 +1,122 @@
 import os
-import hashlib
 import json
-import requests
-from playwright.sync_api import sync_playwright
+import asyncio
+import urllib.request
+import urllib.parse
+from playwright.async_api import async_playwright
 
+# 텔레그램 설정
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
-
-TARGETS = [
-    {"name": "에버랜드 이벤트", "url": "https://www.everland.com/everland/event"},
-    {"name": "에버랜드 공지사항", "url": "https://www.everland.com/everland/announcement"},
-    {"name": "에버랜드 정기권", "url": "https://www.everland.com/everland/ticket"},
-    {"name": "에버랜드 체험 프로그램", "url": "https://www.everland.com/everland/promotion/exp-program"},
-    {"name": "에버랜드 테마뮤직", "url": "https://www.everland.com/everland/everstory/everland-music"},
-    {"name": "에버랜드 드림투어", "url": "https://www.everland.com/everland/promotion/dream-tour"},
-    {"name": "캐리비안베이 이벤트", "url": "https://www.everland.com/caribbeanbay/event"},
-    {"name": "캐리비안베이 공지사항", "url": "https://www.everland.com/caribbeanbay/announcement"},
-    {"name": "홈브리지 공지사항", "url": "https://www.everland.com/homebridge/announcement"}
-]
-
 STATE_FILE = "latest_targets_state.json"
 
-def send_telegram(text):
-    if not TELEGRAM_TOKEN or not CHAT_ID:
-        return
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    try:
-        requests.post(url, json={"chat_id": CHAT_ID, "text": text}, timeout=10)
-    except Exception as e:
-        print(f"텔레그램 전송 에러: {e}")
+# 유저가 직접 제공한 정확한 9개 감시 대상 URL
+TARGETS = [
+    {"name": "공지사항", "url": "https://www.everland.com/everland/announcement"},
+    {"name": "이벤트", "url": "https://www.everland.com/everland/event"},
+    {"name": "정기권", "url": "https://www.everland.com/everland/ticket"},
+    {"name": "체험", "url": "https://www.everland.com/everland/promotion/exp-program"},
+    {"name": "테마뮤직", "url": "https://www.everland.com/everland/everstory/everland-music"},
+    {"name": "드림투어", "url": "https://www.everland.com/everland/promotion/dream-tour"},
+    {"name": "캐리비안베이 공지", "url": "https://www.everland.com/caribbeanbay/announcement"},
+    {"name": "캐비이벤트", "url": "https://www.everland.com/caribbeanbay/event"},
+    {"name": "홈브리지", "url": "https://www.everland.com/homebridge/announcement"}
+]
 
-def run():
-    saved_states = {}
+def send_telegram(message):
+    """텔레그램 메시지 전송"""
+    if not TELEGRAM_TOKEN or not CHAT_ID:
+        print("텔레그램 토큰 또는 CHAT_ID가 설정되지 않았습니다.")
+        return
+    
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = urllib.parse.urlencode({
+        "chat_id": CHAT_ID,
+        "text": message,
+        "parse_mode": "HTML"
+    }).encode("utf-8")
+    
+    try:
+        req = urllib.request.Request(url, data=payload)
+        with urllib.request.urlopen(req) as resp:
+            print("텔레그램 알림 전송 성공")
+    except Exception as e:
+        print(f"텔레그램 전송 실패: {e}")
+
+def load_previous_state():
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE, "r", encoding="utf-8") as f:
-                saved_states = json.load(f)
+                return json.load(f)
         except Exception:
-            saved_states = {}
+            return {}
+    return {}
 
-    new_states = {}
-    changes = []
+def save_current_state(state):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+async def check_targets():
+    prev_state = load_previous_state()
+    current_state = {}
+    updated_items = []
 
-        for item in TARGETS:
-            name = item["name"]
-            url = item["url"]
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        page = await context.new_page()
+
+        for target in TARGETS:
+            name = target["name"]
+            url = target["url"]
+            print(f"[{name}] 감시 중: {url}")
+
             try:
-                # 네트워크 통신 완료 및 SPA 데이터 렌더링 대기
-                page.goto(url, wait_until="networkidle", timeout=30000)
-                page.wait_for_timeout(5000)
+                # 네트워크 상태 안정화 대기
+                await page.goto(url, wait_until="networkidle", timeout=30000)
+                await page.wait_for_timeout(3000)  # 자바스크립트 추가 렌더링 3초 대기
 
-                # main 영역 우선 추출, 없으면 body 추출
-                content_element = page.query_selector("main") or page.query_selector("body")
-                body_text = content_element.inner_text().strip() if content_element else ""
+                # 메인 영역 또는 본문 전체 텍스트 추출
+                content_element = await page.query_selector("main") or await page.query_selector("body")
+                raw_text = await content_element.inner_text() if content_element else ""
+                
+                # 공백 정리
+                clean_text = " ".join(raw_text.split())
+                
+                if not clean_text:
+                    print(f"[{name}] 텍스트 추출 실패 (빈 페이지)")
+                    current_state[name] = prev_state.get(name, "")
+                    continue
 
-                # 유효 데이터(150자 이상)가 정상 렌더링되었을 때만 해시 비교
-                if len(body_text) > 150:
-                    current_hash = hashlib.md5(body_text.encode("utf-8")).hexdigest()
-                    new_states[name] = current_hash
+                current_state[name] = clean_text
 
-                    old_hash = saved_states.get(name)
-                    if old_hash and old_hash != current_hash:
-                        changes.append(f"• [{name}] 변동 감지!\n바로가기: {url}")
-                    elif not old_hash:
-                        print(f"[{name}] 초기 세팅 완료 ({len(body_text)}자)")
+                # 이전 상태와 비교
+                if name in prev_state:
+                    if prev_state[name] != clean_text:
+                        print(f"★ [{name}] 변동 감지!")
+                        updated_items.append((name, url))
                 else:
-                    print(f"[{name}] 데이터 미완성/짧음 ({len(body_text)}자) -> 이전 상태 유지")
-                    if name in saved_states:
-                        new_states[name] = saved_states[name]
+                    print(f"[{name}] 최초 상태 기록 완료")
 
             except Exception as e:
-                print(f"[{name}] 렌더링 실패: {e}")
-                if name in saved_states:
-                    new_states[name] = saved_states[name]
+                print(f"[{name}] 로딩 실패/에러 발생: {e}")
+                # 로딩 실패 시 기존 상태를 유지하여 잘못된 덮어쓰기 방지
+                if name in prev_state:
+                    current_state[name] = prev_state[name]
 
-        browser.close()
+        await browser.close()
 
-    if changes:
-        alert_text = "[에버랜드/캐리비안베이/홈브리지 변동 감지]\n\n" + "\n\n".join(changes)
-        send_telegram(alert_text)
-        print("텔레그램 전송 완료")
-    else:
-        print("변동 사항 없음")
-
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(new_states, f, ensure_ascii=False, indent=2)
+    # 변동 사항이 있을 때만 텔레그램 전송
+    if updated_items:
+        msg = "<b>🚨 에버랜드 새 소식 알림</b>\n\n"
+        for item_name, item_url in updated_items:
+            msg += f"• <b>{item_name}</b> 업데이트 발생!\n👉 <a href='{item_url}'>바로가기</a>\n\n"
+        send_telegram(msg)
+    
+    # 상태 업데이트 저장
+    save_current_state(current_state)
 
 if __name__ == "__main__":
-    run()
+    asyncio.run(check_targets())
